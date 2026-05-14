@@ -9,11 +9,10 @@ esphome:
   friendly_name: Sensor Node 01
   comment: "Bedroom environmental monitoring"
   min_version: 2025.11.0
-  # Automatically starts the 1-minute display timer when powered on
   on_boot:
     priority: -100
     then:
-      - script.execute: display_timer
+    - script.execute: warmup_sequence
 
 esp32:
   board: esp32dev
@@ -21,6 +20,17 @@ esp32:
     type: esp-idf
     advanced:
       minimum_chip_revision: "3.1"
+
+# ============================================================================
+# Global Variables (State Machine)
+# ============================================================================
+globals:
+- id: is_warmed_up
+  type: bool
+  initial_value: 'false'
+- id: is_critical_alarm
+  type: bool
+  initial_value: 'false'
 
 # ============================================================================
 # System Configuration & Network
@@ -35,8 +45,8 @@ api:
     key: !secret node1_api_encryption_key
 
 ota:
-  - platform: esphome
-    password: !secret node_ota_password
+- platform: esphome
+  password: !secret node_ota_password
 
 wifi:
   ssid: !secret wifi_ssid
@@ -57,40 +67,38 @@ web_server:
 # ============================================================================
 
 font:
-  - file: "gfonts://Roboto"
-    id: font_header
-    size: 12
+- file: "gfonts://Roboto"
+  id: font_header
+  size: 12
 
-  - file: "gfonts://Roboto"
-    id: font_data
-    size: 14
+- file: "gfonts://Roboto"
+  id: font_data
+  size: 14
 
-  - file: "gfonts://Roboto"
-    id: font_data_large
-    size: 20
+- file: "gfonts://Roboto"
+  id: font_data_large
+  size: 20
 
-  - file: "./fonts/materialdesignicons-webfont.ttf"
-    id: font_icon_large
-    size: 28 # Well-highlighted icon
-    glyphs:
-      - "\U000F050F" # mdi-thermometer
-      - "\U000F058E" # mdi-water-percent
-      - "\U000F029A" # mdi-gauge
-      - "\U000F00DF" # mdi-brightness
-      - "\U000F1A1B" # mdi-gas-burner
-      - "\U000F12FE" # mdi-molecule-co
-      - "\U000F07E4" # mdi-molecule-co2
-      - "\U000F043F" # mdi-raspberry-pi
-      - "\U000F035B" # mdi-memory
+- file: "./fonts/materialdesignicons-webfont.ttf"
+  id: font_icon_large
+  size: 28 # Well-highlighted icon
+  glyphs:
+  - "󰔏" # mdi-thermometer
+  - "󰖎" # mdi-water-percent
+  - "󰊚" # mdi-gauge
+  - "󰃟" # mdi-brightness
+  - "󱨛" # mdi-gas-burner
+  - "󱋾" # mdi-molecule-co
+  - "󰟤" # mdi-molecule-co2
 
 # ============================================================================
 # Time Component (Internet Clock)
 # ============================================================================
 
 time:
-  - platform: sntp
-    id: sntp_clock
-    timezone: "America/Sao_Paulo"
+- platform: sntp
+  id: sntp_clock
+  timezone: "America/Sao_Paulo"
 
 # ============================================================================
 # Hardware Protocols
@@ -114,336 +122,355 @@ spi:
 # ============================================================================
 
 output:
-  # GPIO 2: Status LED (for testing/diagnostics)
-  - platform: gpio
-    pin: 2
-    id: status_led_output
+# GPIO 2: Status LED (for testing/diagnostics)
+- platform: gpio
+  pin: 2
+  id: status_led_output
 
 light:
-  - platform: binary
-    name: "Sensor Node 01 Status LED"
-    output: status_led_output
-    id: node_01_led
-    icon: mdi:led-on
+- platform: binary
+  name: "Sensor Node 01 Status LED"
+  output: status_led_output
+  id: node_01_led
+  icon: mdi:led-on
 
 # ============================================================================
 # Binary Sensors & Automations
 # ============================================================================
 
 binary_sensor:
-  # Motion/Presence sensor (PIR)
-  - platform: gpio
-    pin: 27
-    name: "Presence Node 01"
-    id: presence_sensor_01
-    device_class: motion
-    # Action when motion is detected
-    on_press:
-      then:
-        # 1. Flash the internal blue LED for 200ms
-        - light.turn_on: node_01_led
-        - delay: 200ms
-        - light.turn_off: node_01_led
-        # 2. Start or reset the display timeout script
-        - script.execute: display_timer
+# Motion/Presence sensor (PIR)
+- platform: gpio
+  pin: 27
+  name: "Presence Node 01"
+  id: presence_sensor_01
+  device_class: motion
+  # Action when motion is detected
+  on_press:
+    then:
+    # 1. Flash the internal blue LED for 200ms
+    - light.turn_on: node_01_led
+    - delay: 200ms
+    - light.turn_off: node_01_led
+    # 2. Start or reset the display timeout script
+    - script.execute: display_timer
 
 # ============================================================================
 # Scripts
 # ============================================================================
 
 script:
-  # Timer that keeps the OLED display on for 1 minute
-  - id: display_timer
-    mode: restart # This makes the timer reset to 0 every time motion is detected
-    then:
-      - lambda: "id(my_oled_display).turn_on();"
-      - delay: 1min
-      - lambda: "id(my_oled_display).turn_off();"
+# Timer that keeps the OLED display on for 1 minute
+- id: display_timer
+  mode: restart # This makes the timer reset to 0 every time motion is detected
+  then:
+  - lambda: "id(my_oled_display).turn_on();"
+  - delay: 1min
+  - lambda: "id(my_oled_display).turn_off();"
+
+# State: Warmup (Heating up on boot)
+- id: warmup_sequence
+  then:
+  - lambda: "id(my_oled_display).turn_on();"
+  - delay: 30s # MQ sensors heating time
+  - globals.set:
+      id: is_warmed_up
+      value: 'true'
+  - script.execute: display_timer
+
+# State: Critical Visual Alarm (Fast LED blink)
+- id: visual_alarm_script
+  mode: restart
+  then:
+  - while:
+      condition:
+        lambda: 'return id(is_critical_alarm);'
+      then:
+      - light.turn_on: node_01_led
+      - delay: 100ms
+      - light.turn_off: node_01_led
+      - delay: 100ms
 
 # ============================================================================
 # Sensor Components
 # ============================================================================
 
 sensor:
-  # Node Pi 01 (.101 - Master)
-  - platform: homeassistant
-    id: node01_cpu_temp
-    entity_id: sensor.pi_master_cpu_thermal_0_temperature
-    internal: true
-  - platform: homeassistant
-    id: node01_cpu_usage
-    entity_id: sensor.192_168_1_101_cpu_usage
-    internal: true
-  - platform: homeassistant
-    id: node01_ram_usage
-    entity_id: sensor.192_168_1_101_memory_usage
-    internal: true
+# Temperature & Humidity (DHT22)
+- platform: dht
+  pin: 4
+  model: DHT22
+  temperature:
+    name: "DHT Temp Node 01"
+    id: dht_temp_01
+  humidity:
+    name: "Humidity Node 01"
+    id: humidity_01
+  update_interval: 60s
 
-  # Node Pi 02 (.102 - Worker)
-  - platform: homeassistant
-    id: node02_cpu_temp
-    entity_id: sensor.192_168_1_102_cpu_thermal_0_temperature
-    internal: true
-  - platform: homeassistant
-    id: node02_cpu_usage
-    entity_id: sensor.192_168_1_102_cpu_usage
-    internal: true
-  - platform: homeassistant
-    id: node02_ram_usage
-    entity_id: sensor.192_168_1_102_memory_usage
-    internal: true
+# Temperature & Pressure (BMP280)
+- platform: bmp280_i2c
+  temperature:
+    name: "BMP Temp Node 01"
+    id: bmp_temp_01
+  pressure:
+    name: "Pressure Node 01"
+    id: bmp_pressure_01
+  address: 0x76 # Change to 0x77 if not detected
+  update_interval: 60s
 
-  # Temperature & Humidity (DHT22)
-  - platform: dht
-    pin: 4
-    model: DHT22
-    temperature:
-      name: "DHT Temp Node 01"
-      id: dht_temp_01
-    humidity:
-      name: "Humidity Node 01"
-      id: humidity_01
-    update_interval: 60s
+# ==========================================================================
+# MQ-2 (Flammable Gas / LPG)
+# ==========================================================================
 
-  # Temperature & Pressure (BMP280)
-  - platform: bmp280_i2c
-    temperature:
-      name: "BMP Temp Node 01"
-      id: bmp_temp_01
-    pressure:
-      name: "Pressure Node 01"
-      id: bmp_pressure_01
-    address: 0x76 # Change to 0x77 if not detected
-    update_interval: 60s
+- platform: adc
+  pin: 35
+  id: mq2_raw
+  internal: true
+  update_interval: 10s
+  attenuation: 12db
 
-  # ==========================================================================
-  # MQ-2 (Flammable Gas / LPG)
-  # ==========================================================================
+- platform: template
+  name: "MQ-2 Gas Node 01"
+  id: mq2_gas_01
+  unit_of_measurement: "ppm"
+  icon: "mdi:gas-burner"
+  update_interval: 10s
+  lambda: |-
+    float r0 = 18.85; // R0 Real = 185.3 / 9.83
+    float rs = 10.0 * (5.0 / id(mq2_raw).state - 1.0);
+    float ratio = rs / r0;
+    float ppm = pow(10, (log10(ratio) - 0.21) / -0.47) * 1000.0;
 
-  - platform: adc
-    pin: 35
-    id: mq2_raw
-    internal: true
-    update_interval: 10s
-    attenuation: 12db
+    if (ppm < 30.0) return 0.0; 
+    return ppm;
+  on_value:
+    then:
+    - if:
+        condition:
+          lambda: 'return x > 300.0;' # Critical gas threshold
+        then:
+        - globals.set:
+            id: is_critical_alarm
+            value: 'true'
+        - script.execute: visual_alarm_script
+        else:
+        - globals.set:
+            id: is_critical_alarm
+            value: 'false'
 
-  - platform: template
-    name: "MQ-2 Gas Node 01"
-    id: mq2_gas_01
-    unit_of_measurement: "ppm"
-    icon: "mdi:gas-burner"
-    update_interval: 10s
-    lambda: |-
-      float r0 = 18.85; // R0 Real = 185.3 / 9.83
-      float rs = 10.0 * (5.0 / id(mq2_raw).state - 1.0);
-      float ratio = rs / r0;
-      float ppm = pow(10, (log10(ratio) - 0.21) / -0.47) * 1000.0;
+# ==========================================================================
+# MQ-7 (Carbon Monoxide - CO)
+# ==========================================================================
 
-      if (ppm < 30.0) return 0.0; 
-      return ppm;
+- platform: adc
+  pin: 32
+  id: mq7_raw
+  internal: true
+  update_interval: 10s
+  attenuation: 12db
 
-  # ==========================================================================
-  # MQ-7 (Carbon Monoxide - CO)
-  # ==========================================================================
+- platform: template
+  name: "MQ-7 CO Node 01"
+  id: mq7_co_01
+  unit_of_measurement: "ppm"
+  icon: "mdi:molecule-co"
+  update_interval: 10s
+  lambda: |-
+    float r0 = 7.64; // R0 Real = 210.3 / 27.5
+    float rs = 10.0 * (5.0 / id(mq7_raw).state - 1.0);
+    float ratio = rs / r0;
+    float ppm = 100.0 * pow(ratio, -1.5);
 
-  - platform: adc
-    pin: 32
-    id: mq7_raw
-    internal: true
-    update_interval: 10s
-    attenuation: 12db
+    if (ppm < 2.0) return 0.0; 
+    return ppm;
 
-  - platform: template
-    name: "MQ-7 CO Node 01"
-    id: mq7_co_01
-    unit_of_measurement: "ppm"
-    icon: "mdi:molecule-co"
-    update_interval: 10s
-    lambda: |-
-      float r0 = 7.64; // R0 Real = 210.3 / 27.5
-      float rs = 10.0 * (5.0 / id(mq7_raw).state - 1.0);
-      float ratio = rs / r0;
-      float ppm = 100.0 * pow(ratio, -1.5);
+# ==========================================================================
+# MQ-135 (Air Quality / CO2)
+# ==========================================================================
 
-      if (ppm < 2.0) return 0.0; 
-      return ppm;
+- platform: adc
+  pin: 33
+  id: mq135_raw
+  internal: true
+  update_interval: 10s
+  attenuation: 12db
 
-  # ==========================================================================
-  # MQ-135 (Air Quality / CO2)
-  # ==========================================================================
+- platform: template
+  name: "MQ-135 Air Quality Node 01"
+  id: mq135_gas_01
+  unit_of_measurement: "ppm"
+  icon: "mdi:molecule-co2"
+  update_interval: 10s
+  lambda: |-
+    float r0 = 128.20; // R0 Real = 1282.0 / 10.0 (ppm of CO2 in ambient air)
+    float rs = 10.0 * (5.0 / id(mq135_raw).state - 1.0);
+    float ratio = rs / r0;
+    float ppm = 116.6 * pow(ratio, -2.769);
 
-  - platform: adc
-    pin: 33
-    id: mq135_raw
-    internal: true
-    update_interval: 10s
-    attenuation: 12db
+    return ppm;
 
-  - platform: template
-    name: "MQ-135 Air Quality Node 01"
-    id: mq135_gas_01
-    unit_of_measurement: "ppm"
-    icon: "mdi:molecule-co2"
-    update_interval: 10s
-    lambda: |-
-      float r0 = 128.20; // R0 Real = 1282.0 / 10.0 (ppm of CO2 in ambient air)
-      float rs = 10.0 * (5.0 / id(mq135_raw).state - 1.0);
-      float ratio = rs / r0;
-      float ppm = 116.6 * pow(ratio, -2.769);
+# ==========================================================================
+# Luminosity sensor (ADC)
+# ==========================================================================
 
-      return ppm;
-
-  # ==========================================================================
-  # Luminosity sensor (ADC)
-  # ==========================================================================
-
-  - platform: adc
-    pin: 34
-    name: "Luminosity Node 01"
-    id: light_sensor_01
-    update_interval: 5s
-    attenuation: 12db
-    unit_of_measurement: "%"
-    filters:
-      - calibrate_linear:
-          - 0.0 -> 100.0
-          - 3.3 -> 0.0
-      - clamp:
-          min_value: 0
-          max_value: 100
+- platform: adc
+  pin: 34
+  name: "Luminosity Node 01"
+  id: light_sensor_01
+  update_interval: 5s
+  attenuation: 12db
+  unit_of_measurement: "%"
+  filters:
+  - calibrate_linear:
+    - 0.0 -> 100.0
+    - 3.3 -> 0.0
+  - clamp:
+      min_value: 0
+      max_value: 100
 
 # ============================================================================
 # Displays (OLED I2C & MAX7219 SPI)
 # ============================================================================
 
 display:
-  # --- Display 1: OLED I2C ---
-  - platform: ssd1306_i2c
-    model: "SSD1306 128x64"
-    address: 0x3c
-    id: my_oled_display
-    pages:
-      # PAGE 1: Temperature
-      - id: page1
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "TEMPERATURE");
-
-          if (id(dht_temp_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F050F"); // mdi-thermometer
-            it.printf(50, 25, id(font_data_large), "%.1f°C", id(dht_temp_01).state);
-          }
-
-      # PAGE 2: Humidity
-      - id: page2
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "HUMIDITY");
-
-          if (id(humidity_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F058E"); // mdi-water-percent
-            it.printf(50, 25, id(font_data_large), "%.1f%%", id(humidity_01).state);
-          }
-
-      # PAGE 3: Pressure
-      - id: page3
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "PRESSURE");
-
-          if (id(bmp_pressure_01).has_state()) {
-            it.print(5, 20, id(font_icon_large), "\U000F029A"); // mdi-gauge
-            it.printf(50, 25, id(font_data_large), "%.0f hPa", id(bmp_pressure_01).state);
-          }
-
-      # PAGE 4: Luminosity
-      - id: page4
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "BRIGHTNESS");
-
-          if (id(light_sensor_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F00DF"); // mdi-brightness
-            it.printf(50, 25, id(font_data_large), "%.0f%%", id(light_sensor_01).state);
-          }
-
-      # PAGE 5: MQ-2 Gas/Smoke
-      - id: page5
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "FLAMMABLE GAS");
-
-          if (id(mq2_gas_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F1A1B"); // mdi-gas-burner
-            it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq2_gas_01).state);
-          }
-
-      # PAGE 6: MQ-7 CO
-      - id: page6
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "CARBON MONOXIDE");
-
-          if (id(mq7_co_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F12FE"); // mdi-molecule-co
-            it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq7_co_01).state);
-          }      
-
-      # PAGE 7: MQ-135 Air Quality
-      - id: page7
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "AIR QUALITY");
-
-          if (id(mq135_gas_01).has_state()) {
-            it.print(10, 20, id(font_icon_large), "\U000F07E4"); // mdi-molecule-co2
-            it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq135_gas_01).state);
-          }
-
-      # PAGE 8: Cluster Health - PI NODE 01
-      - id: page8
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "PI NODE 01 (MASTER)");
-
-          if (id(node01_cpu_temp).has_state()) {
-            it.printf(0, 16, id(font_data), "CPU Temp: %.1fC", id(node01_cpu_temp).state);
-            it.printf(0, 32, id(font_data), "CPU Load: %.0f%%", id(node01_cpu_usage).state);
-            it.printf(0, 48, id(font_data), "RAM Use : %.0f%%", id(node01_ram_usage).state);
-          } else {
-            it.printf(64, 32, id(font_data), TextAlign::CENTER, "Node 01 Offline");
-          }
-
-      # PAGE 9: Cluster Health - PI NODE 02
-      - id: page9
-        lambda: |-
-          it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "PI NODE 02 (WORKER)");
-
-          if (id(node02_cpu_temp).has_state()) {
-            it.printf(0, 16, id(font_data), "CPU Temp: %.1fC", id(node02_cpu_temp).state);
-            it.printf(0, 32, id(font_data), "CPU Load: %.0f%%", id(node02_cpu_usage).state);
-            it.printf(0, 48, id(font_data), "RAM Use : %.0f%%", id(node02_ram_usage).state);
-          } else {
-            it.printf(64, 32, id(font_data), TextAlign::CENTER, "Node 02 Offline");
-          }
-
-  # --- Display 2: 7-Segment MAX7219 (Numeric) ---
-  - platform: max7219
-    cs_pin: 5
-    num_chips: 1
-    intensity: 0 # <--- Change this number (from 0 to 15) to adjust brightness
-    id: led_7seg
+# --- Display 1: OLED I2C ---
+- platform: ssd1306_i2c
+  model: "SSD1306 128x64"
+  address: 0x3c
+  id: my_oled_display
+  pages:
+  # WARMUP SCREEN (Warmup State)
+  - id: page_warmup
     lambda: |-
-      auto time = id(sntp_clock).now();
+      it.printf(64, 15, id(font_header), TextAlign::TOP_CENTER, "INITIALIZING");
+      it.printf(64, 35, id(font_data), TextAlign::TOP_CENTER, "Warming up sensors...");
 
-      // If time or temperature is not ready, show placeholders
-      if (!time.is_valid() || !id(dht_temp_01).has_state()) {
-        it.print("--C --.--");
-        return;
+  # ALARM SCREEN (Alarm State)
+  - id: page_alarm
+    lambda: |-
+      it.printf(64, 15, id(font_header), TextAlign::TOP_CENTER, "!!! ALERT !!!");
+      it.printf(64, 35, id(font_data_large), TextAlign::TOP_CENTER, "CRITICAL GAS!");
+
+  # PAGE 1: Temperature
+  - id: page1
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "TEMPERATURE");
+
+      if (id(dht_temp_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F050F"); // mdi-thermometer
+        it.printf(50, 25, id(font_data_large), "%.1f°C", id(dht_temp_01).state);
       }
 
-      // Fixed display: XX.XC (4 digits) + HH.MM (4 digits) 
-      // Result format: "25.4C18.05"
-      it.printf("%2.1fC%02d.%02d", id(dht_temp_01).state, time.hour, time.minute);
+  # PAGE 2: Humidity
+  - id: page2
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "HUMIDITY");
+
+      if (id(humidity_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F058E"); // mdi-water-percent
+        it.printf(50, 25, id(font_data_large), "%.1f%%", id(humidity_01).state);
+      }
+
+  # PAGE 3: Pressure
+  - id: page3
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "PRESSURE");
+
+      if (id(bmp_pressure_01).has_state()) {
+        it.print(5, 20, id(font_icon_large), "\U000F029A"); // mdi-gauge
+        it.printf(50, 25, id(font_data_large), "%.0f hPa", id(bmp_pressure_01).state);
+      }
+
+  # PAGE 4: Luminosity
+  - id: page4
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "BRIGHTNESS");
+
+      if (id(light_sensor_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F00DF"); // mdi-brightness
+        it.printf(50, 25, id(font_data_large), "%.0f%%", id(light_sensor_01).state);
+      }
+
+  # PAGE 5: MQ-2 Gas/Smoke
+  - id: page5
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "FLAMMABLE GAS");
+
+      if (id(mq2_gas_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F1A1B"); // mdi-gas-burner
+        it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq2_gas_01).state);
+      }
+
+  # PAGE 6: MQ-7 CO
+  - id: page6
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "CARBON MONOXIDE");
+
+      if (id(mq7_co_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F12FE"); // mdi-molecule-co
+        it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq7_co_01).state);
+      }      
+
+  # PAGE 7: MQ-135 Air Quality
+  - id: page7
+    lambda: |-
+      it.printf(64, 0, id(font_header), TextAlign::TOP_CENTER, "AIR QUALITY");
+
+      if (id(mq135_gas_01).has_state()) {
+        it.print(10, 20, id(font_icon_large), "\U000F07E4"); // mdi-molecule-co2
+        it.printf(50, 25, id(font_data_large), "%.0f ppm", id(mq135_gas_01).state);
+      }
+
+# --- Display 2: 7-Segment MAX7219 (Numeric) ---
+- platform: max7219
+  cs_pin: 5
+  num_chips: 1
+  intensity: 0 # <--- Change this number (from 0 to 15) to adjust brightness
+  id: led_7seg
+  lambda: |-
+    auto time = id(sntp_clock).now();
+
+    // If time or temperature is not ready, show placeholders
+    if (!time.is_valid() || !id(dht_temp_01).has_state()) {
+      it.print("--C --.--");
+      return;
+    }
+
+    // Fixed display: XX.XC (4 digits) + HH.MM (4 digits) 
+    // Result format: "25.4C18.05"
+    it.printf("%2.1fC%02d.%02d", id(dht_temp_01).state, time.hour, time.minute);
 
 # ============================================================================
 # Automation (Rotates OLED pages every 5 seconds)
 # ============================================================================
 
 interval:
-  - interval: 5s
-    then:
+- interval: 5s
+  then:
+  # 1. Highest Priority: If warming up, lock to warmup screen
+  - if:
+      condition:
+        lambda: 'return !id(is_warmed_up);'
+      then:
+      - display.page.show:
+          id: my_oled_display
+          page_id: page_warmup
+
+  # 2. High Priority: If alarm triggers, lock to alert screen
+  - if:
+      condition:
+        lambda: 'return id(is_critical_alarm);'
+      then:
+      - display.page.show:
+          id: my_oled_display
+          page_id: page_alarm
+
+  # 3. Normal Flow: If warmed up and no alarm, cycle screens normally
+  - if:
+      condition:
+        lambda: 'return id(is_warmed_up) && !id(is_critical_alarm);'
+      then:
       - display.page.show_next: my_oled_display
-      - component.update: my_oled_display
+
+  - component.update: my_oled_display

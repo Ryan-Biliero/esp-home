@@ -2,20 +2,14 @@
 
 ## Overview
 
-This project manages a distributed IoT sensor network using ESP32 microcontrollers with ESPHome. The system consists of independent remote sensor nodes that communicate directly with a central Home Assistant instance for comprehensive environmental and infrastructure monitoring.
+This project manages a distributed IoT sensor network using ESP32 microcontrollers with ESPHome. The system consists of independent, standalone sensor nodes that provide comprehensive environmental monitoring.
 
 ### Architecture 
 
 ```text
-┌────────────────────────────────────────────────────────────┐
-│                    Home Assistant                          │
-│          (Raspberry Pi Docker Swarm - Central Hub)         │
-└──────┬──────────────────────┬───────────────────────────────┘
-       │                      │
-       │                      │
-┌──────▼──────────────────┐   ┌───────────────────────────────┐
+┌─────────────────────────┐   ┌───────────────────────────────┐
 │   Sensor Node 01        │   │   Sensor Node 02              │
-│   (Gas + Clock + Stats) │   │   (Environmental OLED Display) │
+│   (Gas + Clock)         │   │   (Environmental OLED Display) │
 │  - DHT22 Temp/Humidity  │   │  - BMP280 Temp/Pressure       │
 │  - MQ-2 Flammable Gas   │   │  - DHT22 Temp/Humidity        │
 │  - MQ-7 Carbon Monoxide │   │  - OLED Display 128x64        │
@@ -23,7 +17,6 @@ This project manages a distributed IoT sensor network using ESP32 microcontrolle
 │  - LDR Brightness       │   │                               │
 │  - PIR Motion Sensor    │   │                               │
 │  - OLED + 7-Segment     │   │                               │
-│  - Cluster Health Stats │   │                               │
 └─────────────────────────┘   └───────────────────────────────┘
 ```
 
@@ -35,13 +28,13 @@ This project manages a distributed IoT sensor network using ESP32 microcontrolle
 #### Current Features
 
 *   **Connectivity:** WiFi with automatic fallback AP for recovery
-*   **Integration:** Native Home Assistant API with encryption
+*   **Integration:** Native ESPHome API with encryption
 *   **Web Access:** Built-in web server on port 80 for local interface
 *   **Diagnostics:** Status LED (GPIO 2) with motion-triggered alerts
 *   **Local Display:** Node 01 uses OLED and numeric 7-segment displays; Node 02 uses OLED for environmental data.
 *   **Updates:** Secure OTA (Over-The-Air) wireless updates after initial flash
 *   **Environmental Sensing:** Node 01 tracks gas, temperature, humidity, pressure, brightness and motion; Node 02 tracks temperature, humidity, pressure and brightness.
-*   **Remote Monitoring:** Home Assistant sensor integration for node and system status
+*   **Remote Monitoring:** Node and system status exposed via ESPHome API
 *   **Time Sync:** SNTP internet clock with timezone support
 *   **Automation:** OLED page rotation every 5 seconds on both nodes
 
@@ -86,7 +79,6 @@ esp-home/
 ### Prerequisites
 
 *   ESPHome installed (CLI or Docker Desktop)
-*   Home Assistant instance (Raspberry Pi with Docker recommended)
 *   ESP32 Development Boards (NodeMCU-32S or similar)
 *   USB Cable (USB 2.0 or 3.0 with data transfer capability)
 *   Chromium-based browser (Google Chrome, Microsoft Edge, or Brave)
@@ -98,7 +90,7 @@ esp-home/
 #### 1. Clone or Download This Project
 
 ```bash
-git clone https://github.com/Robson16/esp-home
+git clone https://github.com/Ryan-Biliero/esp-home.git
 cd esp-home
 ```
 
